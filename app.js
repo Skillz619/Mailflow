@@ -610,8 +610,37 @@ function handleLocalQuery(query) {
     // Find if query mentions any category
     const mentionedCategory = allCategories.find(cat => q.includes(cat));
     
+    // Extract search keywords - remove common words
+    const stopWords = ['can', 'you', 'search', 'find', 'where', 'is', 'my', 'the', 'a', 'an', 'for', 'from', 'me', 'email', 'emails', 'mail', 'mails', 'show', 'get', 'exactly', 'are', 'there', 'any'];
+    const searchKeywords = q.split(/\s+/).filter(word => word.length > 1 && !stopWords.includes(word));
+    
+    // Search/Find queries - look for specific emails
+    if (q.includes('search') || q.includes('find') || q.includes('where') || q.includes('look for')) {
+        const matches = state.emails.filter(e => 
+            searchKeywords.some(term =>
+                e.subject.toLowerCase().includes(term) ||
+                e.from.toLowerCase().includes(term) ||
+                e.email.toLowerCase().includes(term) ||
+                e.snippet.toLowerCase().includes(term)
+            )
+        );
+        
+        if (matches.length > 0) {
+            // Also update the email list to show these results
+            state.filteredEmails = matches;
+            state.totalPages = Math.ceil(matches.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = `Search Results`;
+            renderEmails();
+            updatePagination();
+            
+            response = `<strong>Found ${matches.length} emails matching your search:</strong><ul>${matches.slice(0, 8).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>${matches.length > 8 ? `<p><em>...and ${matches.length - 8} more. See the list below.</em></p>` : ''}`;
+        } else {
+            response = `<strong>No emails found matching "${searchKeywords.join(' ')}"</strong><p>Try different keywords or check the spelling.</p>`;
+        }
+    }
     // Count queries
-    if (q.includes('how many') || q.includes('count')) {
+    else if (q.includes('how many') || q.includes('count')) {
         if (mentionedCategory) {
             const count = state.emails.filter(e => e.categories.includes(mentionedCategory)).length;
             response = `You have <strong>${count}</strong> ${mentionedCategory} emails.`;
@@ -629,29 +658,59 @@ function handleLocalQuery(query) {
     // Summary queries
     else if (q.includes('summarize') || q.includes('summary') || q.includes('show') || q.includes('list')) {
         if (mentionedCategory) {
-            const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory)).slice(0, 10);
+            const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory));
+            
+            // Update the list view too
+            state.filteredEmails = categoryEmails;
+            state.totalPages = Math.ceil(categoryEmails.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = mentionedCategory.charAt(0).toUpperCase() + mentionedCategory.slice(1);
+            renderEmails();
+            updatePagination();
+            
             if (categoryEmails.length === 0) {
                 response = `You have no ${mentionedCategory} emails! 🎉`;
             } else {
-                response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length}):</strong><ul>${categoryEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+                response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length} total):</strong><ul>${categoryEmails.slice(0, 10).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>${categoryEmails.length > 10 ? `<p><em>See all ${categoryEmails.length} emails below.</em></p>` : ''}`;
             }
         } else if (q.includes('unread')) {
-            const unread = state.emails.filter(e => e.unread).slice(0, 10);
+            const unread = state.emails.filter(e => e.unread);
+            state.filteredEmails = unread;
+            state.totalPages = Math.ceil(unread.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = 'Unread';
+            renderEmails();
+            updatePagination();
+            
             if (unread.length === 0) {
                 response = 'You have no unread emails! 🎉';
             } else {
-                response = `<strong>Your unread emails (${unread.length}):</strong><ul>${unread.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+                response = `<strong>Your unread emails (${unread.length}):</strong><ul>${unread.slice(0, 10).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
             }
         } else if (q.includes('today')) {
             const today = new Date().toDateString();
-            const todayEmails = state.emails.filter(e => e.date.toDateString() === today).slice(0, 10);
+            const todayEmails = state.emails.filter(e => e.date.toDateString() === today);
+            state.filteredEmails = todayEmails;
+            state.totalPages = Math.ceil(todayEmails.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = "Today's Emails";
+            renderEmails();
+            updatePagination();
+            
             if (todayEmails.length === 0) {
                 response = 'You have no emails from today!';
             } else {
-                response = `<strong>Today's emails (${todayEmails.length}):</strong><ul>${todayEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+                response = `<strong>Today's emails (${todayEmails.length}):</strong><ul>${todayEmails.slice(0, 10).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
             }
         } else if (q.includes('starred')) {
-            const starred = state.emails.filter(e => e.starred).slice(0, 10);
+            const starred = state.emails.filter(e => e.starred);
+            state.filteredEmails = starred;
+            state.totalPages = Math.ceil(starred.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = 'Starred';
+            renderEmails();
+            updatePagination();
+            
             if (starred.length === 0) {
                 response = 'You have no starred emails!';
             } else {
@@ -681,36 +740,50 @@ function handleLocalQuery(query) {
     }
     // Category-specific queries (when just asking about a category)
     else if (mentionedCategory) {
-        const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory)).slice(0, 10);
+        const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory));
+        
+        state.filteredEmails = categoryEmails;
+        state.totalPages = Math.ceil(categoryEmails.length / CONFIG.EMAILS_PER_PAGE) || 1;
+        state.currentPage = 1;
+        elements.sectionTitle.textContent = mentionedCategory.charAt(0).toUpperCase() + mentionedCategory.slice(1);
+        renderEmails();
+        updatePagination();
+        
         if (categoryEmails.length === 0) {
             response = `You have no ${mentionedCategory} emails!`;
         } else {
-            response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length} total):</strong><ul>${categoryEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length} total):</strong><ul>${categoryEmails.slice(0, 10).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
         }
     }
-    // Default - search
+    // Default - search by any keywords found
     else {
         // Search emails by keywords in query
-        const searchTerms = q.split(' ').filter(term => term.length > 2);
         const matches = state.emails.filter(e => 
-            searchTerms.some(term =>
+            searchKeywords.some(term =>
                 e.subject.toLowerCase().includes(term) ||
                 e.from.toLowerCase().includes(term) ||
+                e.email.toLowerCase().includes(term) ||
                 e.snippet.toLowerCase().includes(term)
             )
-        ).slice(0, 10);
+        );
         
         if (matches.length > 0) {
-            response = `<strong>Found ${matches.length} matching emails:</strong><ul>${matches.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            state.filteredEmails = matches;
+            state.totalPages = Math.ceil(matches.length / CONFIG.EMAILS_PER_PAGE) || 1;
+            state.currentPage = 1;
+            elements.sectionTitle.textContent = 'Search Results';
+            renderEmails();
+            updatePagination();
+            
+            response = `<strong>Found ${matches.length} matching emails:</strong><ul>${matches.slice(0, 10).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
         } else {
-            response = `I can help you with:
+            response = `<strong>No results found.</strong><p>I can help you with:</p>
             <ul>
+                <li>"Find Western Union emails"</li>
                 <li>"Summarize finance emails"</li>
                 <li>"Show urgent emails"</li>
                 <li>"How many work emails do I have?"</li>
-                <li>"List promotional emails"</li>
                 <li>"What tasks do I have?"</li>
-                <li>"Show today's emails"</li>
             </ul>`;
         }
     }
@@ -725,6 +798,44 @@ function showAIResponse(content) {
 
 function hideAIResponse() {
     elements.aiResponsePanel.classList.remove('active');
+}
+
+// ==========================================
+// SEARCH FUNCTION
+// ==========================================
+function performSearch(query) {
+    const searchTerm = query.toLowerCase().trim();
+    
+    if (!searchTerm) {
+        applyFilter();
+        return;
+    }
+    
+    // Search ALL emails regardless of current filter
+    const searchResults = state.emails.filter(e =>
+        e.subject.toLowerCase().includes(searchTerm) ||
+        e.from.toLowerCase().includes(searchTerm) ||
+        e.email.toLowerCase().includes(searchTerm) ||
+        e.snippet.toLowerCase().includes(searchTerm)
+    );
+    
+    // Update section title
+    elements.sectionTitle.textContent = `Search Results for "${query}"`;
+    
+    // Display results
+    state.filteredEmails = searchResults;
+    state.totalPages = Math.ceil(searchResults.length / CONFIG.EMAILS_PER_PAGE) || 1;
+    state.currentPage = 1;
+    
+    renderEmails();
+    updatePagination();
+    
+    // Also show AI response with summary
+    if (searchResults.length > 0) {
+        showAIResponse(`<strong>Found ${searchResults.length} emails matching "${query}":</strong><ul>${searchResults.slice(0, 5).map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>${searchResults.length > 5 ? `<p>...and ${searchResults.length - 5} more</p>` : ''}`);
+    } else {
+        showAIResponse(`<strong>No emails found matching "${query}"</strong><p>Try a different search term or ask me a question like "show my finance emails"</p>`);
+    }
 }
 
 // ==========================================
@@ -778,8 +889,16 @@ function applyFilter() {
 }
 
 function isAIQuery(query) {
-    const aiKeywords = ['how many', 'summarize', 'summary', 'what', 'tell me', 'show me', 'find', 'search for', 'tasks', 'urgent', 'important'];
-    return aiKeywords.some(keyword => query.toLowerCase().includes(keyword));
+    const q = query.toLowerCase();
+    // AI query patterns
+    const aiPatterns = [
+        'how many', 'summarize', 'summary', 'tell me', 'show me', 
+        'find', 'search for', 'where is', 'where are', 'can you',
+        'what are', 'what is', 'list', 'get me', 'give me',
+        'do i have', 'any emails', 'tasks', 'todo', 'deadline',
+        'meeting', 'urgent', 'important'
+    ];
+    return aiPatterns.some(pattern => q.includes(pattern));
 }
 
 function renderEmails() {
@@ -1168,15 +1287,12 @@ function initializeEventListeners() {
     elements.googleSignInBtn.addEventListener('click', handleAuthClick);
     elements.logoutBtn.addEventListener('click', handleSignOut);
     
-    // Search & AI
+    // Search & AI - Always use AI when clicking Ask AI button
     elements.aiSearchBtn.addEventListener('click', () => {
         const query = elements.searchInput.value.trim();
         if (query) {
-            if (isAIQuery(query)) {
-                handleAIQuery(query);
-            } else {
-                applyFilter();
-            }
+            // Always use AI when clicking the Ask AI button
+            handleAIQuery(query);
         }
     });
     
@@ -1184,10 +1300,12 @@ function initializeEventListeners() {
         if (e.key === 'Enter') {
             const query = elements.searchInput.value.trim();
             if (query) {
+                // Check if it's an AI query or simple search
                 if (isAIQuery(query)) {
                     handleAIQuery(query);
                 } else {
-                    applyFilter();
+                    // Simple search - search ALL emails regardless of current filter
+                    performSearch(query);
                 }
             }
         }
