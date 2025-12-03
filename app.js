@@ -8,6 +8,7 @@
 // ==========================================
 let state = {
     emails: [],
+    trashEmails: [],
     filteredEmails: [],
     currentFilter: 'inbox',
     currentPage: 1,
@@ -786,30 +787,36 @@ function applyFilter() {
     const filter = state.currentFilter;
     const searchTerm = elements.searchInput.value.toLowerCase();
     
-    let filtered = [...state.emails];
+    let filtered;
     
-    // Apply category/folder filter
-    switch (filter) {
-        case 'inbox':
-            // Show all
-            break;
-        case 'unread':
-            filtered = filtered.filter(e => e.unread);
-            break;
-        case 'starred':
-            filtered = filtered.filter(e => e.starred);
-            break;
-        case 'today':
-            const today = new Date().toDateString();
-            filtered = filtered.filter(e => e.date.toDateString() === today);
-            break;
-        case 'sent':
-        case 'trash':
-            filtered = []; // Would need separate API calls
-            break;
-        default:
-            // Category filters
-            filtered = filtered.filter(e => e.categories.includes(filter));
+    // Handle trash separately
+    if (filter === 'trash') {
+        filtered = [...state.trashEmails];
+    } else {
+        filtered = [...state.emails];
+        
+        // Apply category/folder filter
+        switch (filter) {
+            case 'inbox':
+                // Show all inbox emails
+                break;
+            case 'unread':
+                filtered = filtered.filter(e => e.unread);
+                break;
+            case 'starred':
+                filtered = filtered.filter(e => e.starred);
+                break;
+            case 'today':
+                const today = new Date().toDateString();
+                filtered = filtered.filter(e => e.date.toDateString() === today);
+                break;
+            case 'sent':
+                filtered = []; // Would need separate API calls
+                break;
+            default:
+                // Category filters
+                filtered = filtered.filter(e => e.categories.includes(filter));
+        }
     }
     
     // Apply search filter
@@ -846,6 +853,7 @@ function renderEmails() {
     const start = (state.currentPage - 1) * CONFIG.EMAILS_PER_PAGE;
     const end = start + CONFIG.EMAILS_PER_PAGE;
     const emailsToShow = state.filteredEmails.slice(start, end);
+    const isTrashView = state.currentFilter === 'trash';
     
     if (emailsToShow.length === 0) {
         showEmpty(true);
@@ -858,7 +866,7 @@ function renderEmails() {
     elements.pagination.classList.remove('hidden');
     
     elements.emailList.innerHTML = emailsToShow.map((email, index) => `
-        <div class="email-item ${email.unread ? 'unread' : ''} ${state.selectedEmails.has(email.id) ? 'selected' : ''}" 
+        <div class="email-item ${email.unread ? 'unread' : ''} ${state.selectedEmails.has(email.id) ? 'selected' : ''} ${isTrashView ? 'trash-item' : ''}" 
              data-id="${email.id}" 
              style="animation-delay: ${index * 0.03}s">
             <div class="email-checkbox ${state.selectedEmails.has(email.id) ? 'checked' : ''}" data-id="${email.id}"></div>
@@ -878,9 +886,28 @@ function renderEmails() {
                 <div class="email-subject">${escapeHtml(email.subject)}</div>
                 <div class="email-preview">${escapeHtml(email.snippet)}</div>
                 <div class="email-tags">
+                    ${isTrashView ? '<span class="email-tag trash-tag">TRASH</span>' : ''}
                     ${email.categories.map(cat => `<span class="email-tag ${cat}">${cat}</span>`).join('')}
                 </div>
             </div>
+            ${isTrashView ? `
+            <div class="trash-actions">
+                <button class="trash-action-btn restore-btn" data-id="${email.id}" title="Restore to Inbox">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 14 4 9 9 4"></polyline>
+                        <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+                    </svg>
+                </button>
+                <button class="trash-action-btn delete-permanent-btn" data-id="${email.id}" title="Delete Permanently">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                </button>
+            </div>
+            ` : ''}
         </div>
     `).join('');
     
@@ -909,9 +936,29 @@ function attachEmailEventListeners() {
     
     // Email item clicks (open modal)
     document.querySelectorAll('.email-item').forEach(item => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
+            // Don't open modal if clicking on trash action buttons
+            if (e.target.closest('.trash-actions')) return;
             const id = item.dataset.id;
             openEmailModal(id);
+        });
+    });
+    
+    // Trash restore buttons
+    document.querySelectorAll('.restore-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            restoreFromTrash(id);
+        });
+    });
+    
+    // Trash permanent delete buttons
+    document.querySelectorAll('.delete-permanent-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            permanentlyDeleteEmail(id);
         });
     });
 }
@@ -933,6 +980,7 @@ function updateCategoryCounts() {
         inbox: state.emails.length,
         unread: state.emails.filter(e => e.unread).length,
         starred: state.emails.filter(e => e.starred).length,
+        trash: state.trashEmails.length,
         important: state.emails.filter(e => e.categories.includes('important')).length,
         urgent: state.emails.filter(e => e.categories.includes('urgent')).length,
         work: state.emails.filter(e => e.categories.includes('work')).length,
@@ -1098,35 +1146,64 @@ async function deleteSelectedEmails() {
         return;
     }
     
-    if (!confirm(`Delete ${state.selectedEmails.size} emails?`)) return;
+    const isTrashView = state.currentFilter === 'trash';
+    const confirmMsg = isTrashView 
+        ? `Permanently delete ${state.selectedEmails.size} emails? This cannot be undone.`
+        : `Move ${state.selectedEmails.size} emails to trash?`;
     
-    try {
-        for (const id of state.selectedEmails) {
-            await gapi.client.gmail.users.messages.trash({
-                userId: 'me',
-                id: id
-            });
-            
-            state.emails = state.emails.filter(e => e.id !== id);
+    showConfirmDialog(
+        isTrashView ? 'Permanently Delete?' : 'Move to Trash?',
+        confirmMsg,
+        async () => {
+            try {
+                for (const id of state.selectedEmails) {
+                    if (isTrashView) {
+                        // Permanently delete from trash
+                        await gapi.client.gmail.users.messages.delete({
+                            userId: 'me',
+                            id: id
+                        });
+                        state.trashEmails = state.trashEmails.filter(e => e.id !== id);
+                    } else {
+                        // Move to trash
+                        await gapi.client.gmail.users.messages.trash({
+                            userId: 'me',
+                            id: id
+                        });
+                        
+                        // Move email from inbox to trash
+                        const email = state.emails.find(e => e.id === id);
+                        if (email) {
+                            state.trashEmails.push(email);
+                            state.emails = state.emails.filter(e => e.id !== id);
+                        }
+                    }
+                }
+                
+                state.selectedEmails.clear();
+                updateStats();
+                updateCategoryCounts();
+                applyFilter();
+                showToast(isTrashView ? 'Emails permanently deleted' : 'Emails moved to trash', 'success');
+                
+            } catch (error) {
+                console.error('Error deleting emails:', error);
+                showToast('Error deleting emails', 'error');
+            }
         }
-        
-        state.selectedEmails.clear();
-        updateStats();
-        updateCategoryCounts();
-        applyFilter();
-        showToast('Emails deleted', 'success');
-        
-    } catch (error) {
-        console.error('Error deleting emails:', error);
-        showToast('Error deleting emails', 'error');
-    }
+    );
 }
 
 // ==========================================
 // EMAIL MODAL
 // ==========================================
 function openEmailModal(id) {
-    const email = state.emails.find(e => e.id === id);
+    // Find email in inbox or trash
+    let email = state.emails.find(e => e.id === id);
+    const isTrash = !email;
+    if (!email) {
+        email = state.trashEmails.find(e => e.id === id);
+    }
     if (!email) return;
     
     // Track current email for reply/forward/delete actions
@@ -1138,13 +1215,43 @@ function openEmailModal(id) {
     elements.modalEmail.textContent = email.email;
     elements.modalSubject.textContent = email.subject;
     elements.modalDate.textContent = formatDateFull(email.date);
-    elements.modalTags.innerHTML = email.categories.map(cat => `<span class="email-tag ${cat}">${cat}</span>`).join(' ');
+    
+    // Show trash tag if in trash
+    const trashTag = isTrash ? '<span class="email-tag trash-tag">TRASH</span> ' : '';
+    elements.modalTags.innerHTML = trashTag + email.categories.map(cat => `<span class="email-tag ${cat}">${cat}</span>`).join(' ');
     elements.modalBody.innerHTML = email.body || email.snippet;
+    
+    // Update modal buttons based on whether email is in trash
+    if (isTrash) {
+        elements.modalReply.style.display = 'none';
+        elements.modalForward.style.display = 'none';
+        elements.modalArchive.style.display = 'none';
+        elements.modalDelete.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            Delete Forever
+        `;
+    } else {
+        elements.modalReply.style.display = 'flex';
+        elements.modalForward.style.display = 'flex';
+        elements.modalArchive.style.display = 'flex';
+        elements.modalDelete.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Delete
+        `;
+    }
     
     elements.emailModal.classList.add('active');
     
-    // Mark as read
-    if (email.unread) {
+    // Mark as read (only for inbox emails)
+    if (!isTrash && email.unread) {
         markAsRead(id);
     }
 }
@@ -1574,25 +1681,97 @@ async function archiveEmail(id) {
 // DELETE SINGLE EMAIL
 // ==========================================
 async function deleteEmail(id) {
+    const isTrashView = state.currentFilter === 'trash';
+    
     showConfirmDialog(
-        'Delete email?',
-        'This email will be moved to trash.',
+        isTrashView ? 'Permanently Delete?' : 'Move to Trash?',
+        isTrashView ? 'This email will be permanently deleted. This cannot be undone.' : 'This email will be moved to trash.',
         async () => {
             try {
-                await gapi.client.gmail.users.messages.trash({
-                    userId: 'me',
-                    id: id
-                });
+                if (isTrashView) {
+                    // Permanently delete
+                    await gapi.client.gmail.users.messages.delete({
+                        userId: 'me',
+                        id: id
+                    });
+                    state.trashEmails = state.trashEmails.filter(e => e.id !== id);
+                } else {
+                    // Move to trash
+                    await gapi.client.gmail.users.messages.trash({
+                        userId: 'me',
+                        id: id
+                    });
+                    
+                    const email = state.emails.find(e => e.id === id);
+                    if (email) {
+                        state.trashEmails.push(email);
+                        state.emails = state.emails.filter(e => e.id !== id);
+                    }
+                }
                 
-                state.emails = state.emails.filter(e => e.id !== id);
                 updateStats();
                 updateCategoryCounts();
                 applyFilter();
                 closeEmailModal();
-                showToast('Email deleted', 'success');
+                showToast(isTrashView ? 'Email permanently deleted' : 'Email moved to trash', 'success');
                 
             } catch (error) {
                 console.error('Error deleting email:', error);
+                showToast('Error deleting email', 'error');
+            }
+        }
+    );
+}
+
+// ==========================================
+// RESTORE FROM TRASH
+// ==========================================
+async function restoreFromTrash(id) {
+    try {
+        await gapi.client.gmail.users.messages.untrash({
+            userId: 'me',
+            id: id
+        });
+        
+        // Move email from trash back to inbox
+        const email = state.trashEmails.find(e => e.id === id);
+        if (email) {
+            state.emails.unshift(email); // Add to beginning of inbox
+            state.trashEmails = state.trashEmails.filter(e => e.id !== id);
+        }
+        
+        updateStats();
+        updateCategoryCounts();
+        applyFilter();
+        showToast('Email restored to inbox', 'success');
+        
+    } catch (error) {
+        console.error('Error restoring email:', error);
+        showToast('Error restoring email', 'error');
+    }
+}
+
+// ==========================================
+// PERMANENTLY DELETE EMAIL
+// ==========================================
+async function permanentlyDeleteEmail(id) {
+    showConfirmDialog(
+        'Permanently Delete?',
+        'This email will be permanently deleted. This action cannot be undone.',
+        async () => {
+            try {
+                await gapi.client.gmail.users.messages.delete({
+                    userId: 'me',
+                    id: id
+                });
+                
+                state.trashEmails = state.trashEmails.filter(e => e.id !== id);
+                updateCategoryCounts();
+                applyFilter();
+                showToast('Email permanently deleted', 'success');
+                
+            } catch (error) {
+                console.error('Error permanently deleting email:', error);
                 showToast('Error deleting email', 'error');
             }
         }
