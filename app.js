@@ -497,23 +497,53 @@ async function handleAIQuery(query) {
     showAIResponse('<div class="ai-typing-indicator"><span></span><span></span><span></span></div> Thinking...');
     
     try {
-        const emailContext = state.emails.slice(0, 50).map(e => ({
+        const q = query.toLowerCase();
+        
+        // All available categories
+        const allCategories = ['urgent', 'important', 'work', 'personal', 'promotions', 'social', 'updates', 'finance', 'newsletters', 'spam'];
+        const mentionedCategory = allCategories.find(cat => q.includes(cat));
+        
+        // Filter emails based on query context
+        let relevantEmails;
+        if (mentionedCategory) {
+            relevantEmails = state.emails.filter(e => e.categories.includes(mentionedCategory)).slice(0, 30);
+        } else if (q.includes('unread')) {
+            relevantEmails = state.emails.filter(e => e.unread).slice(0, 30);
+        } else if (q.includes('today')) {
+            const today = new Date().toDateString();
+            relevantEmails = state.emails.filter(e => e.date.toDateString() === today).slice(0, 30);
+        } else if (q.includes('starred')) {
+            relevantEmails = state.emails.filter(e => e.starred).slice(0, 30);
+        } else {
+            relevantEmails = state.emails.slice(0, 50);
+        }
+        
+        const emailContext = relevantEmails.map(e => ({
             from: e.from,
             subject: e.subject,
-            snippet: e.snippet.substring(0, 100),
+            snippet: e.snippet.substring(0, 150),
             date: e.date.toLocaleDateString(),
             categories: e.categories,
             unread: e.unread
         }));
         
-        const prompt = `You are an AI email assistant. Based on the user's emails, answer their question.
+        const categoryInfo = mentionedCategory ? `Focus on ${mentionedCategory} emails.` : '';
+        
+        const prompt = `You are an AI email assistant. Answer the user's question based on their emails.
 
-User's emails (most recent 50):
+${categoryInfo}
+
+Relevant emails (${relevantEmails.length} emails):
 ${JSON.stringify(emailContext, null, 2)}
 
 User's question: ${query}
 
-Provide a helpful, concise response. If asking about counts, be specific. If asking for summaries, be brief but informative. Format with HTML if helpful (use <strong>, <ul>, <li>).`;
+Instructions:
+- Be concise and direct
+- If asking for a summary, list the key emails with sender and subject
+- If asking about counts, provide the exact number
+- Format using HTML: <strong> for emphasis, <ul><li> for lists
+- If no relevant emails found, say so clearly`;
 
         let responseText = '';
         
@@ -574,17 +604,20 @@ function handleLocalQuery(query) {
     const q = query.toLowerCase();
     let response = '';
     
+    // All available categories
+    const allCategories = ['urgent', 'important', 'work', 'personal', 'promotions', 'social', 'updates', 'finance', 'newsletters', 'spam'];
+    
+    // Find if query mentions any category
+    const mentionedCategory = allCategories.find(cat => q.includes(cat));
+    
     // Count queries
     if (q.includes('how many') || q.includes('count')) {
-        if (q.includes('urgent')) {
-            const count = state.emails.filter(e => e.categories.includes('urgent')).length;
-            response = `You have <strong>${count}</strong> urgent emails.`;
+        if (mentionedCategory) {
+            const count = state.emails.filter(e => e.categories.includes(mentionedCategory)).length;
+            response = `You have <strong>${count}</strong> ${mentionedCategory} emails.`;
         } else if (q.includes('unread')) {
             const count = state.emails.filter(e => e.unread).length;
             response = `You have <strong>${count}</strong> unread emails.`;
-        } else if (q.includes('important')) {
-            const count = state.emails.filter(e => e.categories.includes('important')).length;
-            response = `You have <strong>${count}</strong> important emails.`;
         } else if (q.includes('today')) {
             const today = new Date().toDateString();
             const count = state.emails.filter(e => e.date.toDateString() === today).length;
@@ -594,31 +627,51 @@ function handleLocalQuery(query) {
         }
     }
     // Summary queries
-    else if (q.includes('summarize') || q.includes('summary')) {
-        if (q.includes('urgent')) {
-            const urgent = state.emails.filter(e => e.categories.includes('urgent')).slice(0, 5);
-            if (urgent.length === 0) {
-                response = 'You have no urgent emails! 🎉';
+    else if (q.includes('summarize') || q.includes('summary') || q.includes('show') || q.includes('list')) {
+        if (mentionedCategory) {
+            const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory)).slice(0, 10);
+            if (categoryEmails.length === 0) {
+                response = `You have no ${mentionedCategory} emails! 🎉`;
             } else {
-                response = `<strong>Your urgent emails:</strong><ul>${urgent.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+                response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length}):</strong><ul>${categoryEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
             }
         } else if (q.includes('unread')) {
-            const unread = state.emails.filter(e => e.unread).slice(0, 5);
-            response = `<strong>Recent unread emails:</strong><ul>${unread.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            const unread = state.emails.filter(e => e.unread).slice(0, 10);
+            if (unread.length === 0) {
+                response = 'You have no unread emails! 🎉';
+            } else {
+                response = `<strong>Your unread emails (${unread.length}):</strong><ul>${unread.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            }
+        } else if (q.includes('today')) {
+            const today = new Date().toDateString();
+            const todayEmails = state.emails.filter(e => e.date.toDateString() === today).slice(0, 10);
+            if (todayEmails.length === 0) {
+                response = 'You have no emails from today!';
+            } else {
+                response = `<strong>Today's emails (${todayEmails.length}):</strong><ul>${todayEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            }
+        } else if (q.includes('starred')) {
+            const starred = state.emails.filter(e => e.starred).slice(0, 10);
+            if (starred.length === 0) {
+                response = 'You have no starred emails!';
+            } else {
+                response = `<strong>Your starred emails (${starred.length}):</strong><ul>${starred.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+            }
         } else {
-            const recent = state.emails.slice(0, 5);
+            const recent = state.emails.slice(0, 10);
             response = `<strong>Your most recent emails:</strong><ul>${recent.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
         }
     }
     // Task queries
-    else if (q.includes('task') || q.includes('todo') || q.includes('tomorrow') || q.includes('deadline')) {
+    else if (q.includes('task') || q.includes('todo') || q.includes('tomorrow') || q.includes('deadline') || q.includes('meeting')) {
         const taskEmails = state.emails.filter(e => 
             e.categories.includes('work') || 
             e.categories.includes('important') ||
             e.subject.toLowerCase().includes('task') ||
             e.subject.toLowerCase().includes('deadline') ||
-            e.subject.toLowerCase().includes('meeting')
-        ).slice(0, 5);
+            e.subject.toLowerCase().includes('meeting') ||
+            e.subject.toLowerCase().includes('reminder')
+        ).slice(0, 10);
         
         if (taskEmails.length === 0) {
             response = 'No task-related emails found in your inbox.';
@@ -626,24 +679,38 @@ function handleLocalQuery(query) {
             response = `<strong>Potential tasks from your emails:</strong><ul>${taskEmails.map(e => `<li><strong>${e.subject}</strong> from ${e.from}</li>`).join('')}</ul>`;
         }
     }
-    // Default
+    // Category-specific queries (when just asking about a category)
+    else if (mentionedCategory) {
+        const categoryEmails = state.emails.filter(e => e.categories.includes(mentionedCategory)).slice(0, 10);
+        if (categoryEmails.length === 0) {
+            response = `You have no ${mentionedCategory} emails!`;
+        } else {
+            response = `<strong>Your ${mentionedCategory} emails (${categoryEmails.length} total):</strong><ul>${categoryEmails.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
+        }
+    }
+    // Default - search
     else {
-        // Search emails
+        // Search emails by keywords in query
+        const searchTerms = q.split(' ').filter(term => term.length > 2);
         const matches = state.emails.filter(e => 
-            e.subject.toLowerCase().includes(q) ||
-            e.from.toLowerCase().includes(q) ||
-            e.snippet.toLowerCase().includes(q)
-        ).slice(0, 5);
+            searchTerms.some(term =>
+                e.subject.toLowerCase().includes(term) ||
+                e.from.toLowerCase().includes(term) ||
+                e.snippet.toLowerCase().includes(term)
+            )
+        ).slice(0, 10);
         
         if (matches.length > 0) {
             response = `<strong>Found ${matches.length} matching emails:</strong><ul>${matches.map(e => `<li><strong>${e.from}</strong>: ${e.subject}</li>`).join('')}</ul>`;
         } else {
             response = `I can help you with:
             <ul>
-                <li>"How many urgent emails do I have?"</li>
-                <li>"Summarize my unread emails"</li>
+                <li>"Summarize finance emails"</li>
+                <li>"Show urgent emails"</li>
+                <li>"How many work emails do I have?"</li>
+                <li>"List promotional emails"</li>
                 <li>"What tasks do I have?"</li>
-                <li>"How many emails did I get today?"</li>
+                <li>"Show today's emails"</li>
             </ul>`;
         }
     }
