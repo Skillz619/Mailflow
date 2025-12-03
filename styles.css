@@ -1080,6 +1080,56 @@ body {
 .email-tag.finance { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 .email-tag.newsletters { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
 .email-tag.spam { background: rgba(113, 113, 122, 0.15); color: #a1a1aa; }
+.email-tag.trash-tag { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+/* ==========================================
+   Trash Actions
+   ========================================== */
+.email-item.trash-item {
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.email-item.trash-item:hover {
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.trash-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+    padding-left: 1rem;
+    align-items: center;
+}
+
+.trash-action-btn {
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.trash-action-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.trash-action-btn.restore-btn:hover {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.trash-action-btn.delete-permanent-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--danger);
+    color: var(--danger);
+}
 
 /* ==========================================
    Pagination
