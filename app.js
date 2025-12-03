@@ -59,6 +59,7 @@ const elements = {
     selectAllBtn: document.getElementById('selectAllBtn'),
     markReadBtn: document.getElementById('markReadBtn'),
     deleteBtn: document.getElementById('deleteBtn'),
+    composeBtn: document.getElementById('composeBtn'),
     
     // Navigation
     navItems: document.querySelectorAll('.nav-item'),
@@ -76,7 +77,7 @@ const elements = {
     prevPageBtn: document.getElementById('prevPageBtn'),
     nextPageBtn: document.getElementById('nextPageBtn'),
     
-    // Modal
+    // Email Detail Modal
     emailModal: document.getElementById('emailModal'),
     modalClose: document.getElementById('modalClose'),
     modalAvatar: document.getElementById('modalAvatar'),
@@ -86,6 +87,31 @@ const elements = {
     modalDate: document.getElementById('modalDate'),
     modalTags: document.getElementById('modalTags'),
     modalBody: document.getElementById('modalBody'),
+    modalReply: document.getElementById('modalReply'),
+    modalForward: document.getElementById('modalForward'),
+    modalArchive: document.getElementById('modalArchive'),
+    modalDelete: document.getElementById('modalDelete'),
+    
+    // Compose Modal
+    composeModal: document.getElementById('composeModal'),
+    composeClose: document.getElementById('composeClose'),
+    composeMinimize: document.getElementById('composeMinimize'),
+    composeTo: document.getElementById('composeTo'),
+    composeCc: document.getElementById('composeCc'),
+    composeSubject: document.getElementById('composeSubject'),
+    composeBody: document.getElementById('composeBody'),
+    sendEmail: document.getElementById('sendEmail'),
+    discardDraft: document.getElementById('discardDraft'),
+    aiPromptInput: document.getElementById('aiPromptInput'),
+    aiGenerateBtn: document.getElementById('aiGenerateBtn'),
+    
+    // Confirmation Dialog
+    confirmDialog: document.getElementById('confirmDialog'),
+    confirmTitle: document.getElementById('confirmTitle'),
+    confirmMessage: document.getElementById('confirmMessage'),
+    confirmIcon: document.getElementById('confirmIcon'),
+    confirmOk: document.getElementById('confirmOk'),
+    confirmCancel: document.getElementById('confirmCancel'),
     
     // Toast
     toastContainer: document.getElementById('toastContainer')
@@ -1103,6 +1129,9 @@ function openEmailModal(id) {
     const email = state.emails.find(e => e.id === id);
     if (!email) return;
     
+    // Track current email for reply/forward/delete actions
+    currentOpenEmailId = id;
+    
     elements.modalAvatar.textContent = email.from.charAt(0).toUpperCase();
     elements.modalAvatar.style.background = getAvatarColor(email.from);
     elements.modalSender.textContent = email.from;
@@ -1143,6 +1172,431 @@ async function markAsRead(id) {
 
 function closeEmailModal() {
     elements.emailModal.classList.remove('active');
+    currentOpenEmailId = null;
+}
+
+// ==========================================
+// COMPOSE EMAIL FUNCTIONS
+// ==========================================
+let currentReplyTo = null;
+
+function openComposeModal(replyTo = null, forwardEmail = null) {
+    currentReplyTo = replyTo;
+    
+    // Clear previous content
+    elements.composeTo.value = '';
+    elements.composeCc.value = '';
+    elements.composeSubject.value = '';
+    elements.composeBody.value = '';
+    elements.aiPromptInput.value = '';
+    
+    // If replying to an email
+    if (replyTo) {
+        elements.composeTo.value = replyTo.email;
+        elements.composeSubject.value = replyTo.subject.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject}`;
+        elements.composeBody.value = `\n\n---\nOn ${formatDateFull(replyTo.date)}, ${replyTo.from} wrote:\n${replyTo.snippet}`;
+    }
+    
+    // If forwarding an email
+    if (forwardEmail) {
+        elements.composeSubject.value = forwardEmail.subject.startsWith('Fwd:') ? forwardEmail.subject : `Fwd: ${forwardEmail.subject}`;
+        elements.composeBody.value = `\n\n---\nForwarded message:\nFrom: ${forwardEmail.from}\nDate: ${formatDateFull(forwardEmail.date)}\nSubject: ${forwardEmail.subject}\n\n${forwardEmail.snippet}`;
+    }
+    
+    elements.composeModal.classList.add('active');
+    elements.composeTo.focus();
+}
+
+function closeComposeModal() {
+    const hasContent = elements.composeTo.value || elements.composeSubject.value || elements.composeBody.value;
+    
+    if (hasContent) {
+        showConfirmDialog(
+            'Discard draft?',
+            'Your message will be discarded.',
+            () => {
+                elements.composeModal.classList.remove('active');
+                currentReplyTo = null;
+            }
+        );
+    } else {
+        elements.composeModal.classList.remove('active');
+        currentReplyTo = null;
+    }
+}
+
+async function sendEmailMessage() {
+    const to = elements.composeTo.value.trim();
+    const cc = elements.composeCc.value.trim();
+    const subject = elements.composeSubject.value.trim();
+    const body = elements.composeBody.value.trim();
+    
+    // Validation
+    if (!to) {
+        showToast('Please enter a recipient email', 'error');
+        elements.composeTo.focus();
+        return;
+    }
+    
+    if (!isValidEmail(to)) {
+        showToast('Please enter a valid email address', 'error');
+        elements.composeTo.focus();
+        return;
+    }
+    
+    if (!subject) {
+        showToast('Please enter a subject', 'error');
+        elements.composeSubject.focus();
+        return;
+    }
+    
+    if (!body) {
+        showToast('Please enter a message body', 'error');
+        elements.composeBody.focus();
+        return;
+    }
+    
+    // Show loading state
+    elements.sendEmail.disabled = true;
+    elements.sendEmail.classList.add('loading');
+    elements.sendEmail.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+        </svg>
+        Sending...
+    `;
+    
+    try {
+        // Create email message
+        let email = [
+            `To: ${to}`,
+            `From: ${state.user.email}`,
+            `Subject: ${subject}`,
+            'Content-Type: text/plain; charset=utf-8',
+            '',
+            body
+        ];
+        
+        if (cc) {
+            email.splice(2, 0, `Cc: ${cc}`);
+        }
+        
+        const rawMessage = btoa(unescape(encodeURIComponent(email.join('\r\n'))))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+        
+        // Send via Gmail API
+        await gapi.client.gmail.users.messages.send({
+            userId: 'me',
+            resource: {
+                raw: rawMessage
+            }
+        });
+        
+        showToast('Email sent successfully!', 'success');
+        elements.composeModal.classList.remove('active');
+        currentReplyTo = null;
+        
+    } catch (error) {
+        console.error('Error sending email:', error);
+        showToast('Failed to send email. Please try again.', 'error');
+    } finally {
+        // Reset button
+        elements.sendEmail.disabled = false;
+        elements.sendEmail.classList.remove('loading');
+        elements.sendEmail.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+            Send
+        `;
+    }
+}
+
+function isValidEmail(email) {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+}
+
+// ==========================================
+// AI EMAIL GENERATION
+// ==========================================
+async function generateEmailWithAI() {
+    const prompt = elements.aiPromptInput.value.trim();
+    
+    if (!prompt) {
+        showToast('Please describe what you want to write', 'info');
+        elements.aiPromptInput.focus();
+        return;
+    }
+    
+    const provider = CONFIG.AI_PROVIDER;
+    const apiKey = CONFIG[`${provider.toUpperCase()}_API_KEY`];
+    
+    if (!apiKey || apiKey.startsWith('YOUR_')) {
+        showToast('AI API key not configured', 'error');
+        return;
+    }
+    
+    // Show loading state
+    elements.aiGenerateBtn.disabled = true;
+    elements.aiGenerateBtn.classList.add('loading');
+    
+    try {
+        const aiPrompt = `You are an email writing assistant. Write a professional email based on this request:
+
+"${prompt}"
+
+Requirements:
+- Write only the email body (no subject line)
+- Be professional but friendly
+- Be concise and clear
+- Do not include any greetings like "Subject:" or "To:"
+- Start directly with a greeting like "Dear..." or "Hi..." 
+- End with an appropriate closing and signature placeholder like "[Your Name]"
+
+Write the email:`;
+
+        let generatedText = '';
+        
+        if (provider === 'gemini') {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: aiPrompt }] }]
+                })
+            });
+            const data = await response.json();
+            
+            if (data.candidates && data.candidates[0]) {
+                generatedText = data.candidates[0].content.parts[0].text;
+            } else {
+                throw new Error('No response from AI');
+            }
+            
+        } else if (provider === 'openai') {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-3.5-turbo',
+                    messages: [{ role: 'user', content: aiPrompt }],
+                    temperature: 0.7
+                })
+            });
+            const data = await response.json();
+            generatedText = data.choices[0].message.content;
+            
+        } else if (provider === 'claude') {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-haiku-20240307',
+                    max_tokens: 1024,
+                    messages: [{ role: 'user', content: aiPrompt }]
+                })
+            });
+            const data = await response.json();
+            generatedText = data.content[0].text;
+        }
+        
+        // Set the generated text in the compose body
+        elements.composeBody.value = generatedText;
+        
+        // Also try to generate a subject if empty
+        if (!elements.composeSubject.value) {
+            await generateSubjectWithAI(prompt);
+        }
+        
+        showToast('Email generated! Review and edit as needed.', 'success');
+        
+    } catch (error) {
+        console.error('Error generating email:', error);
+        showToast('Failed to generate email. Please try again.', 'error');
+    } finally {
+        elements.aiGenerateBtn.disabled = false;
+        elements.aiGenerateBtn.classList.remove('loading');
+    }
+}
+
+async function generateSubjectWithAI(prompt) {
+    const provider = CONFIG.AI_PROVIDER;
+    const apiKey = CONFIG[`${provider.toUpperCase()}_API_KEY`];
+    
+    try {
+        const subjectPrompt = `Based on this email request: "${prompt}"
+        
+Generate a short, professional email subject line (max 10 words). Only output the subject, nothing else.`;
+
+        let subject = '';
+        
+        if (provider === 'gemini') {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: subjectPrompt }] }]
+                })
+            });
+            const data = await response.json();
+            if (data.candidates && data.candidates[0]) {
+                subject = data.candidates[0].content.parts[0].text.trim();
+            }
+        } else if (provider === 'openai') {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-3.5-turbo',
+                    messages: [{ role: 'user', content: subjectPrompt }],
+                    temperature: 0.7,
+                    max_tokens: 50
+                })
+            });
+            const data = await response.json();
+            subject = data.choices[0].message.content.trim();
+        }
+        
+        if (subject) {
+            elements.composeSubject.value = subject.replace(/^["']|["']$/g, '');
+        }
+        
+    } catch (error) {
+        console.log('Could not generate subject:', error);
+    }
+}
+
+// ==========================================
+// CONFIRMATION DIALOG
+// ==========================================
+let confirmCallback = null;
+
+function showConfirmDialog(title, message, onConfirm, isDanger = true) {
+    elements.confirmTitle.textContent = title;
+    elements.confirmMessage.textContent = message;
+    confirmCallback = onConfirm;
+    
+    if (isDanger) {
+        elements.confirmIcon.className = 'confirm-icon';
+        elements.confirmOk.className = 'confirm-ok';
+    } else {
+        elements.confirmIcon.className = 'confirm-icon success';
+        elements.confirmOk.className = 'confirm-ok primary';
+    }
+    
+    elements.confirmDialog.classList.add('active');
+}
+
+function closeConfirmDialog() {
+    elements.confirmDialog.classList.remove('active');
+    confirmCallback = null;
+}
+
+function executeConfirm() {
+    if (confirmCallback) {
+        confirmCallback();
+    }
+    closeConfirmDialog();
+}
+
+// ==========================================
+// MARK AS UNREAD
+// ==========================================
+async function markSelectedAsUnread() {
+    if (state.selectedEmails.size === 0) {
+        showToast('No emails selected', 'info');
+        return;
+    }
+    
+    try {
+        for (const id of state.selectedEmails) {
+            await gapi.client.gmail.users.messages.modify({
+                userId: 'me',
+                id: id,
+                resource: { addLabelIds: ['UNREAD'] }
+            });
+            
+            const email = state.emails.find(e => e.id === id);
+            if (email) email.unread = true;
+        }
+        
+        state.selectedEmails.clear();
+        updateStats();
+        updateCategoryCounts();
+        renderEmails();
+        showToast('Marked as unread', 'success');
+        
+    } catch (error) {
+        console.error('Error marking as unread:', error);
+        showToast('Error marking emails', 'error');
+    }
+}
+
+// ==========================================
+// ARCHIVE EMAILS
+// ==========================================
+async function archiveEmail(id) {
+    try {
+        await gapi.client.gmail.users.messages.modify({
+            userId: 'me',
+            id: id,
+            resource: { removeLabelIds: ['INBOX'] }
+        });
+        
+        state.emails = state.emails.filter(e => e.id !== id);
+        updateStats();
+        updateCategoryCounts();
+        applyFilter();
+        closeEmailModal();
+        showToast('Email archived', 'success');
+        
+    } catch (error) {
+        console.error('Error archiving email:', error);
+        showToast('Error archiving email', 'error');
+    }
+}
+
+// ==========================================
+// DELETE SINGLE EMAIL
+// ==========================================
+async function deleteEmail(id) {
+    showConfirmDialog(
+        'Delete email?',
+        'This email will be moved to trash.',
+        async () => {
+            try {
+                await gapi.client.gmail.users.messages.trash({
+                    userId: 'me',
+                    id: id
+                });
+                
+                state.emails = state.emails.filter(e => e.id !== id);
+                updateStats();
+                updateCategoryCounts();
+                applyFilter();
+                closeEmailModal();
+                showToast('Email deleted', 'success');
+                
+            } catch (error) {
+                console.error('Error deleting email:', error);
+                showToast('Error deleting email', 'error');
+            }
+        }
+    );
 }
 
 // ==========================================
@@ -1248,6 +1702,78 @@ function initializeEventListeners() {
     elements.markReadBtn.addEventListener('click', markSelectedAsRead);
     elements.deleteBtn.addEventListener('click', deleteSelectedEmails);
     
+    // Compose button
+    elements.composeBtn.addEventListener('click', () => openComposeModal());
+    
+    // Compose modal events
+    elements.composeClose.addEventListener('click', closeComposeModal);
+    elements.composeMinimize.addEventListener('click', () => {
+        elements.composeModal.classList.remove('active');
+    });
+    elements.discardDraft.addEventListener('click', closeComposeModal);
+    elements.sendEmail.addEventListener('click', sendEmailMessage);
+    
+    // AI email generation
+    elements.aiGenerateBtn.addEventListener('click', generateEmailWithAI);
+    elements.aiPromptInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            generateEmailWithAI();
+        }
+    });
+    
+    // AI suggestion buttons
+    document.querySelectorAll('.ai-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.aiPromptInput.value = btn.dataset.prompt;
+            generateEmailWithAI();
+        });
+    });
+    
+    // Compose modal click outside to close
+    elements.composeModal.addEventListener('click', (e) => {
+        if (e.target === elements.composeModal) {
+            closeComposeModal();
+        }
+    });
+    
+    // Confirmation dialog
+    elements.confirmOk.addEventListener('click', executeConfirm);
+    elements.confirmCancel.addEventListener('click', closeConfirmDialog);
+    elements.confirmDialog.addEventListener('click', (e) => {
+        if (e.target === elements.confirmDialog) {
+            closeConfirmDialog();
+        }
+    });
+    
+    // Email modal action buttons
+    elements.modalReply.addEventListener('click', () => {
+        const email = state.emails.find(e => e.id === currentOpenEmailId);
+        if (email) {
+            closeEmailModal();
+            openComposeModal(email);
+        }
+    });
+    
+    elements.modalForward.addEventListener('click', () => {
+        const email = state.emails.find(e => e.id === currentOpenEmailId);
+        if (email) {
+            closeEmailModal();
+            openComposeModal(null, email);
+        }
+    });
+    
+    elements.modalArchive.addEventListener('click', () => {
+        if (currentOpenEmailId) {
+            archiveEmail(currentOpenEmailId);
+        }
+    });
+    
+    elements.modalDelete.addEventListener('click', () => {
+        if (currentOpenEmailId) {
+            deleteEmail(currentOpenEmailId);
+        }
+    });
+    
     // Navigation
     elements.navItems.forEach(item => {
         item.addEventListener('click', () => {
@@ -1255,6 +1781,8 @@ function initializeEventListeners() {
             item.classList.add('active');
             state.currentFilter = item.dataset.filter;
             elements.sectionTitle.textContent = item.querySelector('.nav-item-text')?.textContent || 'All Mail';
+            elements.searchInput.value = ''; // Clear search
+            hideAIResponse();
             applyFilter();
         });
     });
@@ -1290,7 +1818,7 @@ function initializeEventListeners() {
         }
     });
     
-    // Modal
+    // Email Detail Modal
     elements.modalClose.addEventListener('click', closeEmailModal);
     elements.emailModal.addEventListener('click', (e) => {
         if (e.target === elements.emailModal) {
@@ -1300,12 +1828,33 @@ function initializeEventListeners() {
     
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        // Escape key
         if (e.key === 'Escape') {
-            closeEmailModal();
-            hideAIResponse();
+            if (elements.confirmDialog.classList.contains('active')) {
+                closeConfirmDialog();
+            } else if (elements.composeModal.classList.contains('active')) {
+                closeComposeModal();
+            } else if (elements.emailModal.classList.contains('active')) {
+                closeEmailModal();
+            } else {
+                hideAIResponse();
+            }
+        }
+        
+        // Ctrl/Cmd + Enter to send email
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && elements.composeModal.classList.contains('active')) {
+            sendEmailMessage();
+        }
+        
+        // C to compose (when not in input)
+        if (e.key === 'c' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+            openComposeModal();
         }
     });
 }
+
+// Track current open email for reply/forward/delete
+let currentOpenEmailId = null;
 
 // ==========================================
 // INITIALIZATION
