@@ -15,7 +15,7 @@ const CONFIG = {
     OPENAI_API_KEY: 'YOUR_OPENAI_API_KEY',
     
     // Option 2: Google Gemini
-    GEMINI_API_KEY: 'YOUR_GEMINI_API_KEY',
+    GEMINI_API_KEY: 'AIzaSyCePYI71K8m-H8SVDNrxIZE5UT3ux56xiY',
     
     // Option 3: Anthropic Claude
     CLAUDE_API_KEY: 'YOUR_CLAUDE_API_KEY',
