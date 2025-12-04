@@ -583,15 +583,23 @@ Instructions:
             responseText = data.choices[0].message.content;
             
         } else if (provider === 'gemini') {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        temperature: 0.7,
+                        maxOutputTokens: 1024
+                    }
                 })
             });
             const data = await response.json();
-            responseText = data.candidates[0].content.parts[0].text;
+            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+                responseText = data.candidates[0].content.parts[0].text;
+            } else {
+                throw new Error('No response from Gemini');
+            }
             
         } else if (provider === 'claude') {
             const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1450,6 +1458,13 @@ async function generateEmailWithAI() {
     // Show loading state
     elements.aiGenerateBtn.disabled = true;
     elements.aiGenerateBtn.classList.add('loading');
+    const originalBtnText = elements.aiGenerateBtn.innerHTML;
+    elements.aiGenerateBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+        </svg>
+        Generating...
+    `;
     
     try {
         const aiPrompt = `You are an email writing assistant. Write a professional email based on this request:
@@ -1469,19 +1484,43 @@ Write the email:`;
         let generatedText = '';
         
         if (provider === 'gemini') {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: aiPrompt }] }]
-                })
-            });
-            const data = await response.json();
+            // Try gemini-1.5-flash first, fallback to gemini-pro
+            const models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+            let success = false;
             
-            if (data.candidates && data.candidates[0]) {
-                generatedText = data.candidates[0].content.parts[0].text;
-            } else {
-                throw new Error('No response from AI');
+            for (const model of models) {
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: aiPrompt }] }],
+                            generationConfig: {
+                                temperature: 0.7,
+                                maxOutputTokens: 1024
+                            }
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    console.log('Gemini response:', data);
+                    
+                    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+                        generatedText = data.candidates[0].content.parts[0].text;
+                        success = true;
+                        break;
+                    } else if (data.error) {
+                        console.log(`Model ${model} error:`, data.error.message);
+                        continue;
+                    }
+                } catch (e) {
+                    console.log(`Model ${model} failed:`, e);
+                    continue;
+                }
+            }
+            
+            if (!success) {
+                throw new Error('All Gemini models failed');
             }
             
         } else if (provider === 'openai') {
@@ -1518,6 +1557,10 @@ Write the email:`;
             generatedText = data.content[0].text;
         }
         
+        if (!generatedText) {
+            throw new Error('No text generated');
+        }
+        
         // Set the generated text in the compose body
         elements.composeBody.value = generatedText;
         
@@ -1534,6 +1577,12 @@ Write the email:`;
     } finally {
         elements.aiGenerateBtn.disabled = false;
         elements.aiGenerateBtn.classList.remove('loading');
+        elements.aiGenerateBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            Generate
+        `;
     }
 }
 
@@ -1549,15 +1598,19 @@ Generate a short, professional email subject line (max 10 words). Only output th
         let subject = '';
         
         if (provider === 'gemini') {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: [{ parts: [{ text: subjectPrompt }] }]
+                    contents: [{ parts: [{ text: subjectPrompt }] }],
+                    generationConfig: {
+                        temperature: 0.7,
+                        maxOutputTokens: 50
+                    }
                 })
             });
             const data = await response.json();
-            if (data.candidates && data.candidates[0]) {
+            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
                 subject = data.candidates[0].content.parts[0].text.trim();
             }
         } else if (provider === 'openai') {
