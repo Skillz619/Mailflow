@@ -7,15 +7,15 @@ const CONFIG = {
     // Google OAuth Configuration
     GOOGLE_CLIENT_ID: '992504995990-kcdc1543k49pn3fh8808ih6mck74pd91.apps.googleusercontent.com',
     
-    // Gmail API Scopes
-    SCOPES: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+    // Gmail API Scopes (includes send permission)
+    SCOPES: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
     
     // AI API Configuration (Choose one)
     // Option 1: OpenAI
     OPENAI_API_KEY: 'YOUR_OPENAI_API_KEY',
     
     // Option 2: Google Gemini
-    GEMINI_API_KEY: 'AIzaSyCePYI71K8m-H8SVDNrxIZE5UT3ux56xiY',
+    GEMINI_API_KEY: 'AIzaSyDgbUnswvCTuSpnZ6ZUW-7afcz7vIwQeIo',
     
     // Option 3: Anthropic Claude
     CLAUDE_API_KEY: 'YOUR_CLAUDE_API_KEY',
