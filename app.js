@@ -583,7 +583,7 @@ Instructions:
             responseText = data.choices[0].message.content;
             
         } else if (provider === 'gemini') {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -595,8 +595,11 @@ Instructions:
                 })
             });
             const data = await response.json();
-            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            console.log('Gemini search response:', data);
+            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
                 responseText = data.candidates[0].content.parts[0].text;
+            } else if (data.error) {
+                throw new Error(data.error.message);
             } else {
                 throw new Error('No response from Gemini');
             }
@@ -1484,17 +1487,21 @@ Write the email:`;
         let generatedText = '';
         
         if (provider === 'gemini') {
-            // Try gemini-1.5-flash first, fallback to gemini-pro
-            const models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+            // Use current Gemini models - try multiple in order
+            const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
             let success = false;
+            let lastError = null;
             
             for (const model of models) {
                 try {
+                    console.log(`Trying model: ${model}`);
                     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            contents: [{ parts: [{ text: aiPrompt }] }],
+                            contents: [{ 
+                                parts: [{ text: aiPrompt }] 
+                            }],
                             generationConfig: {
                                 temperature: 0.7,
                                 maxOutputTokens: 1024
@@ -1503,24 +1510,29 @@ Write the email:`;
                     });
                     
                     const data = await response.json();
-                    console.log('Gemini response:', data);
+                    console.log(`Response from ${model}:`, data);
                     
-                    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+                    if (data.error) {
+                        console.log(`Model ${model} error:`, data.error.message);
+                        lastError = data.error.message;
+                        continue;
+                    }
+                    
+                    if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
                         generatedText = data.candidates[0].content.parts[0].text;
                         success = true;
+                        console.log('Generated text:', generatedText);
                         break;
-                    } else if (data.error) {
-                        console.log(`Model ${model} error:`, data.error.message);
-                        continue;
                     }
                 } catch (e) {
                     console.log(`Model ${model} failed:`, e);
+                    lastError = e.message;
                     continue;
                 }
             }
             
             if (!success) {
-                throw new Error('All Gemini models failed');
+                throw new Error(lastError || 'All Gemini models failed');
             }
             
         } else if (provider === 'openai') {
@@ -1573,7 +1585,7 @@ Write the email:`;
         
     } catch (error) {
         console.error('Error generating email:', error);
-        showToast('Failed to generate email. Please try again.', 'error');
+        showToast('Failed to generate email: ' + error.message, 'error');
     } finally {
         elements.aiGenerateBtn.disabled = false;
         elements.aiGenerateBtn.classList.remove('loading');
@@ -1598,7 +1610,7 @@ Generate a short, professional email subject line (max 10 words). Only output th
         let subject = '';
         
         if (provider === 'gemini') {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1610,7 +1622,7 @@ Generate a short, professional email subject line (max 10 words). Only output th
                 })
             });
             const data = await response.json();
-            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
                 subject = data.candidates[0].content.parts[0].text.trim();
             }
         } else if (provider === 'openai') {
